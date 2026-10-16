@@ -10,6 +10,9 @@ export const Assistant = () => {
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
     transport: new AssistantChatTransport({
       api: "/api/chat",
+      prepareSendMessagesRequest: ({ id, messages, trigger }) => ({
+        body: { id, message: messages.at(-1), trigger },
+      }),
     }),
   });
 
