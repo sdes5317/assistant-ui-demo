@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { UIMessage } from "ai";
 
@@ -31,6 +31,30 @@ export async function loadChat(id: string): Promise<StoredChat | null> {
 
 export function emptyChat(id: string): StoredChat {
   return { id, updatedAt: new Date().toISOString(), headId: null, messages: [] };
+}
+
+export async function listChats() {
+  await mkdir(chatDirectory(), { recursive: true });
+  const files = await readdir(chatDirectory(), { withFileTypes: true });
+  const chats = await Promise.all(
+    files
+      .filter((file) => file.isFile() && file.name.endsWith(".json"))
+      .map((file) => loadChat(file.name.slice(0, -5))),
+  );
+  return chats
+    .filter((chat): chat is StoredChat => chat !== null)
+    .map((chat) => ({
+      id: chat.id,
+      title:
+        branchMessages(chat)
+          .find((message) => message.role === "user")
+          ?.parts.filter((part) => part.type === "text")
+          .map((part) => part.text)
+          .join("")
+          .slice(0, 60) || "新對話",
+      updatedAt: chat.updatedAt,
+    }))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 export function branchMessages(chat: StoredChat, headId = chat.headId): UIMessage[] {

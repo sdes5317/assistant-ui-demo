@@ -5,7 +5,7 @@ import { after, test } from "node:test";
 import { MockLanguageModelV4 } from "ai/test";
 import { simulateReadableStream, type UIMessage } from "ai";
 import { createChatHandler } from "../lib/chat-handler.ts";
-import { branchMessages, loadChat } from "../lib/chat-store.ts";
+import { branchMessages, listChats, loadChat } from "../lib/chat-store.ts";
 
 await mkdir(".chats", { recursive: true });
 const directory = await mkdtemp(path.resolve(".chats/test-"));
@@ -79,4 +79,18 @@ test("rejects full-history payloads, path traversal and invalid messages", async
     assert.equal((await send(body)).response.status, 400);
   }
   assert.equal(await loadChat("invalid"), null);
+});
+
+test("history survives reloading the store and lists conversation titles", async () => {
+  const reloaded = await loadChat("latest-only");
+  assert.ok(reloaded);
+  assert.deepEqual(
+    branchMessages(reloaded).map((message) => message.role),
+    ["user", "assistant", "user", "assistant"],
+  );
+  const chats = await listChats();
+  assert.deepEqual(
+    chats.map((chat) => ({ id: chat.id, title: chat.title })),
+    [{ id: "latest-only", title: "first" }],
+  );
 });

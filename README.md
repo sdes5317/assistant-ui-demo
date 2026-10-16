@@ -49,6 +49,13 @@ npx assistant-ui add
 - `app/api/chat/route.ts` - Chat API endpoint
 - `components/assistant-ui/elements/thread.tsx` - Chat thread component
 
+## 歷史紀錄
+
+首頁會導向新的 `/chat/<id>`。送出第一筆訊息後，側欄出現該對話；
+點選歷史紀錄或重新整理同一 URL，Server Component 會讀取 JSON，
+透過 `messageRepository` 還原訊息及 parentId。空白對話不會產生檔案。
+切換 URL 以 `key={id}` 重新建立 runtime，避免混用不同對話。
+
 ## 單筆訊息傳輸
 
 `AssistantChatTransport.prepareSendMessagesRequest` 只送出 `{ id, message, trigger }`，
