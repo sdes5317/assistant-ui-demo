@@ -11,7 +11,14 @@ export const Assistant = ({ chat }: { chat: StoredChat }) => {
   const router = useRouter();
   const runtime = useChatRuntime({
     messageRepository: { headId: chat.headId, messages: chat.messages },
-    onFinish: () => router.refresh(),
+    onFinish: () => {
+      window.history.replaceState(window.history.state, "", `/chat/${chat.id}`);
+      router.refresh();
+    },
+    unstable_onBranchChange: ({ headId }) => {
+      const query = headId ? `?head=${encodeURIComponent(headId)}` : "";
+      window.history.replaceState(window.history.state, "", `/chat/${chat.id}${query}`);
+    },
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
     transport: new AssistantChatTransport({
       api: "/api/chat",

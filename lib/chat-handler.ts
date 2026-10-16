@@ -25,7 +25,7 @@ export function createChatHandler(model: LanguageModel) {
       !isValidId(body.id) ||
       "messages" in body ||
       !(body.parentId === null || isValidId(body.parentId)) ||
-      body.trigger !== "submit-message" ||
+      !["submit-message", "regenerate-message"].includes(body.trigger) ||
       !isValidId(body.message?.id) ||
       body.message?.role !== "user"
     ) {
@@ -53,6 +53,7 @@ export function createChatHandler(model: LanguageModel) {
       const parent = chat.messages.find((item) => item.message.id === body.parentId);
       const existing = chat.messages.find((item) => item.message.id === message.id);
       if (
+        (body.trigger === "regenerate-message" && !existing) ||
         (body.parentId !== null && parent?.message.role !== "assistant") ||
         (existing &&
           (existing.parentId !== body.parentId ||

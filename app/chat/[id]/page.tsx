@@ -5,11 +5,22 @@ import { emptyChat, isValidId, listChats, loadChat } from "@/lib/chat-store";
 
 export const dynamic = "force-dynamic";
 
-export default async function ChatPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ChatPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ head?: string }>;
+}) {
   const { id } = await params;
   if (!isValidId(id)) notFound();
   const [stored, chats] = await Promise.all([loadChat(id), listChats()]);
   const chat = stored ?? emptyChat(id);
+  const { head } = await searchParams;
+  if (head !== undefined) {
+    if (!isValidId(head) || !chat.messages.some((item) => item.message.id === head)) notFound();
+    chat.headId = head;
+  }
 
   return (
     <div className="flex h-dvh flex-col sm:flex-row">

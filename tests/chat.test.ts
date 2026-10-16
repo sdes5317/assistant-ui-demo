@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { after, test } from "node:test";
 import { MockLanguageModelV4 } from "ai/test";
@@ -168,4 +168,137 @@ test("history survives reloading the store and lists conversation titles", async
       { id: "latest-only", title: "first" },
     ],
   );
+});
+
+test("regeneration uses only its user message and preserves old replies", async () => {
+  const id = "regenerate";
+  const message = user("regen-user", "question");
+  await send({ id, parentId: null, trigger: "submit-message", message });
+  const oldReply = branchMessages((await loadChat(id))!)[1]!;
+  const result = await send({ id, parentId: null, trigger: "regenerate-message", message });
+  assert.equal(result.response.status, 200);
+  assert.match(result.text, /context:1/);
+  const saved = (await loadChat(id))!;
+  assert.equal(saved.messages.length, 3);
+  assert.equal(saved.messages.filter((item) => item.message.role === "user").length, 1);
+  const visible = branchMessages(saved);
+  assert.equal(visible.length, 2);
+  assert.notEqual(visible[1]!.id, oldReply.id);
+  assert.equal(branchMessages(saved, oldReply.id)[1]!.id, oldReply.id);
+
+  await send({
+    id,
+    parentId: visible[1]!.id,
+    trigger: "submit-message",
+    message: user("regen-later", "later"),
+  });
+  const earlier = await send({ id, parentId: null, trigger: "regenerate-message", message });
+  assert.match(earlier.text, /context:1/);
+  assert.equal(branchMessages((await loadChat(id))!).length, 2);
+  assert.equal(
+    (
+      await send({
+        id,
+        parentId: null,
+        trigger: "regenerate-message",
+        message: user("unknown-user", "missing"),
+      })
+    ).response.status,
+    409,
+  );
+});
+
+test("generation saves after the response consumer disconnects", async () => {
+  const response = await handle(
+    new Request("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        id: "disconnect",
+        parentId: null,
+        trigger: "submit-message",
+        message: user("disconnect-user", "hello"),
+      }),
+    }),
+  );
+  await response.body!.cancel();
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const chat = await loadChat("disconnect");
+    if (chat && branchMessages(chat).length === 2) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail("Assistant response was not persisted after disconnect");
+});
+
+test("overlapping requests return 409 and release the chat after completion", async () => {
+  let unblock!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    unblock = resolve;
+  });
+  const slow = createChatHandler(
+    new MockLanguageModelV4({
+      doStream: async (options) => {
+        await ready;
+        return model.doStream(options);
+      },
+    }),
+  );
+  const body = {
+    id: "overlap",
+    parentId: null,
+    trigger: "submit-message",
+    message: user("overlap-user", "hello"),
+  };
+  const first = await slow(
+    new Request("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  );
+  try {
+    assert.equal((await send(body)).response.status, 409);
+  } finally {
+    unblock();
+  }
+  await first.text();
+  assert.equal((await send({ ...body, trigger: "regenerate-message" })).response.status, 200);
+});
+
+test("model failure keeps the user message and allows retry", async (context) => {
+  context.mock.method(console, "error", () => {});
+  const failing = createChatHandler(
+    new MockLanguageModelV4({
+      doStream: async () => {
+        throw new Error("Simulated provider failure");
+      },
+    }),
+  );
+  const body = {
+    id: "failure",
+    parentId: null,
+    trigger: "submit-message",
+    message: user("failed-user", "hello"),
+  };
+  const response = await failing(
+    new Request("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  );
+  assert.match(await response.text(), /回覆失敗/);
+  assert.equal(branchMessages((await loadChat("failure"))!)[0]!.id, "failed-user");
+  assert.equal((await send(body)).response.status, 200);
+});
+
+test("corrupt history fails without overwriting the original file", async (context) => {
+  context.mock.method(console, "error", () => {});
+  const file = path.join(directory, "corrupt.json");
+  await writeFile(file, "broken history", "utf8");
+  const result = await send({
+    id: "corrupt",
+    parentId: null,
+    trigger: "submit-message",
+    message: user("corrupt-user", "hello"),
+  });
+  assert.equal(result.response.status, 500);
+  assert.equal(await readFile(file, "utf8"), "broken history");
 });
