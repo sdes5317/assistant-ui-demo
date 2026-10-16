@@ -52,7 +52,12 @@ async function send(body: object) {
 
 test("one-message requests rebuild context and persist stable response IDs", async () => {
   const id = "latest-only";
-  const first = await send({ id, trigger: "submit-message", message: user("u1", "first") });
+  const first = await send({
+    id,
+    parentId: null,
+    trigger: "submit-message",
+    message: user("u1", "first"),
+  });
   assert.equal(first.response.status, 200);
   assert.match(first.text, /context:1/);
   const chat = await loadChat(id);
@@ -61,7 +66,12 @@ test("one-message requests rebuild context and persist stable response IDs", asy
   assert.equal(firstMessages.length, 2);
   assert.match(first.text, new RegExp(firstMessages[1]!.id));
 
-  const second = await send({ id, trigger: "submit-message", message: user("u2", "second") });
+  const second = await send({
+    id,
+    parentId: firstMessages[1]!.id,
+    trigger: "submit-message",
+    message: user("u2", "second"),
+  });
   assert.equal(second.response.status, 200);
   assert.match(second.text, /context:3/);
   const saved = JSON.parse(await readFile(path.join(directory, `${id}.json`), "utf8"));
@@ -81,6 +91,68 @@ test("rejects full-history payloads, path traversal and invalid messages", async
   assert.equal(await loadChat("invalid"), null);
 });
 
+test("editing an earlier message uses its parent and preserves both branches", async () => {
+  const id = "edit";
+  await send({
+    id,
+    parentId: null,
+    trigger: "submit-message",
+    message: user("old-user", "original"),
+  });
+  const original = branchMessages((await loadChat(id))!);
+  await send({
+    id,
+    parentId: original[1]!.id,
+    trigger: "submit-message",
+    message: user("later-user", "later"),
+  });
+
+  const edited = await send({
+    id,
+    parentId: null,
+    trigger: "submit-message",
+    message: user("edited-user", "changed"),
+  });
+  assert.equal(edited.response.status, 200);
+  assert.match(edited.text, /context:1/);
+  const chat = (await loadChat(id))!;
+  assert.equal(chat.messages.length, 6);
+  assert.equal(branchMessages(chat)[0]!.id, "edited-user");
+  assert.equal(branchMessages(chat, original[1]!.id)[0]!.id, "old-user");
+
+  const continued = await send({
+    id,
+    parentId: original[1]!.id,
+    trigger: "submit-message",
+    message: user("old-branch-user", "continue old branch"),
+  });
+  assert.equal(continued.response.status, 200);
+  assert.match(continued.text, /context:3/);
+  assert.deepEqual(
+    branchMessages((await loadChat(id))!)
+      .map((message) => message.id)
+      .slice(0, 3),
+    ["old-user", original[1]!.id, "old-branch-user"],
+  );
+
+  for (const body of [
+    {
+      id,
+      parentId: "unknown",
+      trigger: "submit-message",
+      message: user("u-new", "invalid parent"),
+    },
+    { id, parentId: null, trigger: "submit-message", message: user("old-user", "overwrite") },
+    {
+      id,
+      parentId: null,
+      trigger: "submit-message",
+      message: user(original[1]!.id, "overwrite assistant"),
+    },
+  ])
+    assert.equal((await send(body)).response.status, 409);
+});
+
 test("history survives reloading the store and lists conversation titles", async () => {
   const reloaded = await loadChat("latest-only");
   assert.ok(reloaded);
@@ -91,6 +163,9 @@ test("history survives reloading the store and lists conversation titles", async
   const chats = await listChats();
   assert.deepEqual(
     chats.map((chat) => ({ id: chat.id, title: chat.title })),
-    [{ id: "latest-only", title: "first" }],
+    [
+      { id: "edit", title: "original" },
+      { id: "latest-only", title: "first" },
+    ],
   );
 });

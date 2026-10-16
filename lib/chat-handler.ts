@@ -24,6 +24,7 @@ export function createChatHandler(model: LanguageModel) {
       typeof body !== "object" ||
       !isValidId(body.id) ||
       "messages" in body ||
+      !(body.parentId === null || isValidId(body.parentId)) ||
       body.trigger !== "submit-message" ||
       !isValidId(body.message?.id) ||
       body.message?.role !== "user"
@@ -49,10 +50,23 @@ export function createChatHandler(model: LanguageModel) {
     running.add(id);
     try {
       const chat = (await loadChat(id)) ?? emptyChat(id);
-      const history = branchMessages(chat);
-      // Repeated delivery of a user message must not duplicate it.
-      const existing = history.findIndex((item) => item.id === message.id);
-      const messages = [...(existing < 0 ? history : history.slice(0, existing)), message];
+      const parent = chat.messages.find((item) => item.message.id === body.parentId);
+      const existing = chat.messages.find((item) => item.message.id === message.id);
+      if (
+        (body.parentId !== null && parent?.message.role !== "assistant") ||
+        (existing &&
+          (existing.parentId !== body.parentId ||
+            existing.message.role !== "user" ||
+            JSON.stringify(existing.message.parts) !== JSON.stringify(message.parts)))
+      ) {
+        running.delete(id);
+        return Response.json(
+          { error: "Message or parent does not match this chat" },
+          { status: 409 },
+        );
+      }
+      // Edit is a new message with the original parent; keep the old branch.
+      const messages = [...branchMessages(chat, body.parentId), message];
       await saveBranch(chat, messages);
       const result = streamText({
         model,

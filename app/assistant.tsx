@@ -16,7 +16,12 @@ export const Assistant = ({ chat }: { chat: StoredChat }) => {
     transport: new AssistantChatTransport({
       api: "/api/chat",
       prepareSendMessagesRequest: ({ messages, trigger }) => ({
-        body: { id: chat.id, message: messages.at(-1), trigger },
+        body: {
+          id: chat.id,
+          message: messages.at(-1),
+          parentId: messages.at(-2)?.id ?? null,
+          trigger,
+        },
       }),
     }),
   });

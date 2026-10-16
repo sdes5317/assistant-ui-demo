@@ -58,12 +58,18 @@ npx assistant-ui add
 
 ## 單筆訊息傳輸
 
-`AssistantChatTransport.prepareSendMessagesRequest` 只送出 `{ id, message, trigger }`，
+`AssistantChatTransport.prepareSendMessagesRequest` 只送出 `{ id, message, parentId, trigger }`，
 沒有 `messages` 歷史陣列。後端從 `.chats/<id>.json` 重建上下文，先保存使用者訊息，
 再於串流 `onEnd` 保存完整 `UIMessage` 與伺服器產生的 assistant ID。
 檔案透過暫存檔與 rename 更新；資料不會加入 Git。
 
 此為單機、單一 Node process 的文字對話範例，同一對話生成期間的其他請求會回傳 409。
+
+## 修改
+
+沿用 Thread 內建的鉛筆與 Update 按鈕。修改後的訊息取得新 ID，
+並傳送原先的 `parentId`；後端只取該 parent 的祖先作為模型上下文，
+保留原始分支。重新開啟對話時，所有分支都會經 `messageRepository` 還原。
 
 ```bash
 npm test
